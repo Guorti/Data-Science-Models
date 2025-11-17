@@ -1,0 +1,254 @@
+---
+title: "Lasso Model"
+author: "Guorti"
+output: word_document
+---
+
+# Carga de paquetes
+
+```{r}
+install.packages("faraway")
+install.packages("tidyverse")
+install.packages("skimr")
+install.packages("DataExplorer")
+install.packages("scales")
+install.packages("corrr")
+###### Para el modelamiento #####
+install.packages("glmnet")
+install.packages("pls")
+install.packages("MLmetrics")
+```
+
+# Carga de librerias
+```{r}
+library(faraway)
+library(tidyverse)
+library(skimr)
+library(DataExplorer)
+library(scales)
+library(corrr)
+library(glmnet)
+library(pls)
+library(MLmetrics)
+
+
+
+
+
+
+```
+
+
+# Carga de la base
+```{r}
+
+library(readxl)
+datos <- read_excel("Base Ridge_Lasso 1.xlsx", sheet = "Desocupados") # Trabajar con una pestaña especifica
+datos <- datos[, -1] # Se elimina la primera columna que corresponde a la fecha de los datos
+head(datos)
+```
+
+Asi se elimine la variable tiempo, los datos si tienen que estar relacionados a este.
+
+Objetivo 1: Pronosticar la variable Y en funcion de las X's
+Objetivo 2: Determinar el aporte de cada variable x_i
+
+Todas las variables deben ser numericas y continuas
+
+Modelo Lasso != Regresion multiple.
+
+
+# Divison de la vase de datos en Train y Tests
+Se creara una particion 70% - 30% para la realizacion del modelo.
+
+```{r}
+set.seed(1235)
+id_train <- sample(1:nrow(datos), size = 0.7*nrow(datos), replace =F)
+
+
+datos_train <- datos[id_train,]
+datos_test <- datos[-id_train,]
+
+dim(datos_train) ; dim(datos_test)
+
+
+```
+
+cuidado con confundir penalizaciones
+
+
+# Matrices de Train y Test
+
+Se debe reemplazar "Desocupados" por en nombre de la variable a pronosticar.
+
+
+
+```{r}
+x_train <- model.matrix(Desocupados ~ . , data = datos_train)[,-1] # El -1 quita la primera
+y_train <- datos_train$Desocupados
+
+
+x_test <- model.matrix(Desocupados ~ . , data = datos_test)[,-1] # El -1 quita la primera
+y_test <- datos_test$Desocupados
+
+```
+
+
+# Creacion y entrenamineto el modelo 
+
+Para obtener un ajuste con regularizacion Lasso, se indica el argumento $\alpha =1$, ademas se sugiere que el parametro $\lambda$ se inicie en 100, o de lo contrario la funcion lo asignara en un rango automatico que tiene por defecto.
+
+lambda, punto de inicio de la iteracion
+
+```{r}
+modelo <-glmnet(
+  x = x_train,
+  y = y_train,
+  alpha = 1, # Regularizacion lasso
+  nlambda = 100, # Si se desea modificar se debe usar un multiplo de 10
+  standardize = T # Estandariza las variables
+  )
+```
+
+NO es tan recomendable estandarizar en log natural.
+standardize = T, lo hace de la forma recomendada
+
+# Determinar aportes. Evolucion de los coeficientes en funcion de lambda
+
+
+
+
+```{r}
+regularizacion <- modelo$beta %>%
+  as.matrix() %>%
+  t() %>%
+  as.tibble() %>%
+  mutate(lambda = modelo$lambda)
+
+
+regularizacion <- regularizacion %>%
+  pivot_longer(
+    cols = !lambda,
+    names_to = "predictor",
+    values_to = "coeficientes"
+  )
+
+
+regularizacion %>%
+  ggplot(aes(x = lambda, y = coeficientes, color = predictor)) +
+  geom_line() +
+  scale_x_log10(
+    breaks = trans_breaks("log10", function(x) 10^x),
+    labels = trans_format("log10", math_format(10^.x))
+  ) + 
+  labs(title = "Coeficientes en funcion de la regularizacion") + 
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+En el grafico anterior se evidencia el comportamiento de la evolucion del valor de $\lambda$, en este caso a medida que aumenta dicho valor, la regularizacion es mayor, en otras palabras mas predictores son excluidos (Significa que el aporte de algunas variables en el pronostico de la Y es nulo. dado que su coeficiente es cero.) Escoge lo mejor de las x, las que mejr se scomportan respecto a la y, lasso lo elimina raich salva mas variables.
+
+
+# Evolucion del error del modelo en funcion de lambda
+
+```{r}
+set.seed(123)
+cv_error <- cv.glmnet(
+  x = x_train,
+  y = y_train,
+  alpha = 1, # 1 para lasso, no para rai
+  nfolds = 10,
+  type.measure = "mse",
+  standardize = T
+)
+
+plot(cv_error)
+```
+Grafico de la evolucion del error, las dos lineas punteadas son los lambda optimos, el error debe tender hacia 0 sin llegar a el. Lambda optimo para que el modelo sea mejor
+
+
+# Mejor Lambda encontrado
+
+```{r}
+paste("Mejor lambda encontrado: ", cv_error$lambda.min)
+```
+# Mejor lambda encontrado + 1sd
+El mayor valor de lambda con el que la prueba de t-test de error no se aleja mas de una desviacion estandar del valor minimo.
+
+```{r}
+paste("Mejor lambda encontrado", cv_error$lambda.1se)
+```
+
+# Mejor modelo lambda óptimo +1sd
+
+```{r}
+modelo <- glmnet(
+  x = x_train,
+  y = y_train,
+  alpha = 1,
+  lambda = cv_error$lambda.1se,
+  standardize = TRUE
+)
+```
+
+# Coeficientes del modelo
+
+```{r}
+install.packages("writexl")
+library(writexl)
+df_coeficientes <- coef(modelo) %>%
+  as.matrix() %>%
+  as_tibble(rownames = "predictor") %>%
+  rename(coeficiente = s0)
+
+df_coeficientes %>%
+  filter(predictor != "(Intercept)") %>%
+  ggplot(aes(x = predictor, y = coeficiente)) +
+  geom_col() +
+  labs(title = "Coeficientes del modelo Lasso") +
+  theme_bw() +
+  theme(axis.title.x = element_text(size = 6, angle = 45))
+
+# Exportar los coeficientes
+library(writexl)
+write_xlsx(df_coeficientes, "Coeficientes_lasso.xlsx")
+
+```
+
+# Predicciones del entrenamiento
+```{r}
+predicciones_train <- predict(modelo, newx = x_train)
+```
+
+
+# MSE de entrenamiento 
+Evaluar que tan bueno es el modelo o no, aqui no hay matriz de confusion, aqui hay MSE y el mape (promedio de los errores)
+
+```{r}
+training_lasso <- mean((predicciones_train - y_train)^2)
+paste("Error (mse) de entrenamiento:", training_lasso)
+```
+
+
+# Predicciones del test
+```{r}
+predicciones_test <- predict(modelo, newx = x_test)
+```
+
+
+# MSE del test 
+```{r}
+test_mse_lasso <- mean((predicciones_test - y_test)^2)
+paste("Error (mse) de test:", test_mse_lasso)
+```
+# MAPE
+Error que genera este modelo
+```{r}
+MAPE = round(MAPE(predicciones_test, y_test)*100,2)
+paste("MAPE:", MAPE, "%")
+```
+
+
+
+
+
