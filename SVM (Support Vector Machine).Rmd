@@ -1,0 +1,173 @@
+---
+title: "SVM"
+author: "Guorti"
+output: word_document
+---
+
+
+# Ejemplo 1
+
+Simular dos variables aleatorias de tamaño 10, media 2 y varianza 1
+
+
+```{r}
+library(ggplot2)
+x1 <- rnorm(n=10, mean = 2, sd = 1)
+x2 <- rnorm(n=10, mean = 2, sd = 1)
+datos <- data.frame(x1=c(x1,x1+2), x2 = c(x2,x2+2), grupo = rep(c(-1,1), each =10))
+
+
+datos$grupo <- as.factor(datos$grupo)
+#datos
+```
+
+```{r}
+ggplot()+
+  geom_point(data = datos, aes(x = x1, y = x2, color = grupo), size = 4)+
+  geom_abline(intercept = 9, slope = -2)+
+  geom_abline(intercept = 8.5, slope = -1.7)+
+  geom_abline(intercept = 8, slope = -1.5)+
+  geom_abline(intercept = 6.5, slope = -1)+
+  geom_abline(intercept = 5.4, slope = -0.75)+
+theme_bw()+
+  labs(title = "Generación de 5 posibles hiperplanos de separación")
+theme(legend.position = "none", 
+      plot.title = element_text(hjust = 0.5, size = 10))
+```
+
+
+# Hiperplano óptimo de separación
+
+```{r}
+library(e1071)
+grupo <-  as.factor(datos$grupo)
+svmfit <- svm(grupo ~ ., data = datos, kernel = "linear", scale = F)
+print(svmfit)
+table(grupo, svmfit$fitted)
+svmfit$fitted # Presenta la clasificacion de los individuos
+
+```
+# SVM tantos grupos como yo quiera. Solo me interesa que la x sean cuantitativas
+
+# Casos Cuasi-Separables
+
+```{r}
+datos1 <- matrix(rnorm(40), 20, 2)
+colnames(datos1) <- c("x11", "x22")
+y <- c(rep(-1, 10), rep(1,10))
+y <- as.factor(y)
+datos1[y == 1,] <- datos1[y==1,] + 1
+datos2 <- data.frame(datos1,y)
+```
+
+
+# Vamos a ver por que el kernel lineal no es el mejor en este caso
+```{r}
+ggplot(data = datos2, aes(x = x11, y = x22,
+          color = as.factor(y))) +
+  geom_point(size = 4) +
+  theme_bw() +
+  labs(title = "Clases no separables linealmente") +
+  theme(legend.position = "none")
+  plot.title = element_text(hjust = 0.5, size = 10)
+ 
+```
+
+# cost, hasta cuantos puntos soport que esten mal
+# Muchos registro, 100k + no plot.
+```{r}
+datos2$y <- as.factor(datos2$y)
+modelo_svm <- svm(formula = y ~ x11 + x22, data = datos2, kernel = "linear", cost = 10, scale =F) # Cost es la cantidad de valores que YO acepto que queden mal clasificado
+#modelo_svm$fitted
+plot(modelo_svm, datos2)
+# No funciona el kernel lineal
+```
+
+
+```{r}
+# Rango de predictores
+rango_x1 <- range(datos2$x11)
+rango_x2 <- range(datos2$x22)
+
+# Interpolacion de puntos
+#[2] que va atener en cuenta el minimo y el maximo
+new_x1 <- seq(from = rango_x1[1], to = rango_x1[2], length = 100)
+new_x2 <- seq(from = rango_x2[1], to = rango_x2[2], length = 100)
+nuevos_puntos <- expand.grid(x11 = new_x1, x22 = new_x2)
+
+# Prediccion
+predicciones <- predict(object = modelo_svm, newdata = nuevos_puntos)
+
+# Almacenar los datos nuevos o los pronosticos
+color_regiones <- data.frame(nuevos_puntos, y = predicciones)
+
+# Euaciones dle hiperplano
+beta <- drop(modelo_svm$coefs) %*%
+  as.matrix(datos[,c("x1", "x2")])[modelo_svm$index,]
+beta0 <- modelo_svm$rho
+
+```
+
+
+
+```{r}
+# Graficar los puntos originales (oscuros)
+plot(datos2$x11, datos2$x22, 
+     col = ifelse(datos2$y == 1, "darkblue", "darkred"), 
+     pch = 19,
+     xlab = "x11", ylab = "x22",
+     main = "SVM no lineal: regiones pastel y puntos oscuros")
+
+# Colorear las regiones con tonos pastel semitransparentes
+library(grDevices)
+colors_region <- ifelse(color_regiones$y == 1, rgb(0.7, 0.85, 1, 0.4),  # azul pastel
+                        rgb(1, 0.8, 0.8, 0.4))                         # rojo pastel
+
+points(color_regiones$x11, color_regiones$x22, col = colors_region, pch = 15)
+
+# Añadir leyenda
+legend("topright", legend = c("Clase -1", "Clase 1"), 
+       col = c("darkred", "darkblue"), pch = 19,
+       title = "Clases")
+
+```
+
+```{r}
+# --- GRAFICAR SVM NO LINEAL: REGIONES PASTEL + PUNTOS OSCUROS ---
+
+# Cargar librería para colores con transparencia
+library(grDevices)
+
+# Crear los colores pastel según la clase predicha
+colors_region <- ifelse(color_regiones$y == 1, 
+                        rgb(0.7, 0.85, 1, 0.4),   # azul pastel translúcido
+                        rgb(1, 0.8, 0.8, 0.4))   # rojo pastel translúcido
+
+# Iniciar el gráfico base con los límites correctos
+plot(datos2$x11, datos2$x22,
+     col = ifelse(datos2$y == 1, "darkblue", "darkred"),
+     pch = 19, cex = 1.2,
+     xlab = "x11", ylab = "x22",
+     main = "SVM no lineal: regiones pastel y puntos oscuros",
+     xlim = range(color_regiones$x11),
+     ylim = range(color_regiones$x22))
+
+# Dibujar primero las regiones (para que queden al fondo)
+points(color_regiones$x11, color_regiones$x22, 
+       col = colors_region, pch = 15, cex = 0.8)
+
+# Luego dibujar los puntos originales encima (más oscuros)
+points(datos2$x11, datos2$x22,
+       col = ifelse(datos2$y == 1, "darkblue", "darkred"),
+       pch = 19, cex = 1.2)
+
+# Añadir leyenda
+legend("topright",
+       legend = c("Clase -1", "Clase 1"),
+       col = c("darkred", "darkblue"),
+       pch = 19,
+       title = "Clases",
+       bty = "n")
+
+```
+
