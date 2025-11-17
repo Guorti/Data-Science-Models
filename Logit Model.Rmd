@@ -1,0 +1,274 @@
+---
+title: "Modelo Logit"
+author: "Guorti"
+output: word_document
+---
+
+# Modelo Logit
+
+## Carga de paquetes
+
+```{r}
+# Paquete para el manejo de bases de datos
+  #install.packages("dplyr")
+# Paquete para machine learning
+  #install.packages("caret")
+# Carga de bd
+  #install.packages("haven")
+  #install.packages("ROSE")
+# Balancear la Y, ejemplo de 10 hombres 2 mujeres, esta desbalanceado
+  #install.packages("imbalance")
+# Machine learning
+  #install.packages("smotefamily")
+
+
+```
+
+## Librerias
+```{r}
+library(dplyr)
+library(caret)
+library(haven)
+library(ROSE)
+library(imbalance)
+library(smotefamily)
+
+
+```
+
+## Carga de la base de datos
+
+```{r}
+library(haven)
+TOTAL_NACIONAL_ANUAL_2021 <- read_dta("TOTAL_NACIONAL_ANUAL_2021/TOTAL_NACIONAL_ANUAL_2021.dta")
+```
+
+```{r}
+Base <- TOTAL_NACIONAL_ANUAL_2021
+# De Base vamos a seleccionar las variables para el modelo, quitarle peso a la carga
+
+# El dane genera un diccionario por cada BD
+# P6920 corresponde a si cotiza
+
+# Control enter teniendo seleccionadas las variables las carga
+y <- Base$p6920
+sexo <- Base$p6020 # Variable genero
+edad <- Base$p6040 # Edad
+educa <- Base$p6220 # Nivel educativo
+escola <- Base$esc # Anhos de escolaridad
+salario <- Base$inglabo # Ingresos laborales
+contrato <- Base$p6460 # Tipo de contrato
+estrato <- Base$p4030s1a1 # Estrato
+
+base1 <- data.frame(y,sexo, edad, educa, escola, salario, contrato, estrato) # Generamos una BD con las variables del modelo
+
+# Eliminar todos los valores faltantes
+
+base2 <- na.omit(base1)
+
+# Eiminar las respuestas de NS/NR
+
+basef <- base2
+basef <- filter(basef, y != 3) # Eliminar los pensionados
+
+# Seleccionar todos los 2 y los convertira en 1
+basef$y <- ifelse(basef$y == 2, 0, 1) # 0: Cotizan y 1: No cotiza
+
+# Convertirla en un factor, si esta en terminos numericos los van a sumar, quiero que sepa que son grupos
+basef$y <- as.factor(basef$y)
+
+basef <- filter(basef, educa != 9) # Eliminar los no sabe/no responde de la variable
+
+basef$educa <- as.factor(basef$educa)
+
+# Eliminar los 9
+basef <- filter(basef, contrato != 9)
+
+basef$contrato <- as.factor(basef$contrato)
+
+basef$sexo <- ifelse(basef$sexo == 1, "Hombre", "A.Mujer") # Hombre: 1 y mujer: 0, el grupo 0 es el grupo de comparacion, 0 siempre es el mas importante
+basef$sexo <- as.factor(basef$sexo)
+
+basef$educa <- ifelse(basef$educa == 1, "A.Ninguno",
+                      ifelse(basef$educa == 2, "Bachiller",
+                             ifelse(basef$educa == 3, "Tecnico",
+                                    ifelse(basef$educa == 4, "Universitario", "Posgrado"))))
+basef$educa <- as.factor(basef$educa)
+
+basef$estrato <- ifelse(basef$estrato == 1, 1,
+                        ifelse(basef$estrato == 2, 1,
+                               ifelse(basef$estrato == 3, 2,
+                                      ifelse(basef$estrato == 4, 2,
+                                             ifelse(basef$estrato == 5, 3, 3)))))
+
+basef$estrato <- as.factor(basef$estrato)
+
+```
+
+
+# Modelo logit
+
+# Paso 1. Verificar la distribucion de la variable Y
+
+Se genera una tabla de frecuencia donde se evidencia el comportamiento de las dos categorias de la variable. Se busca que las categorias tengan valores cercanos estili 50-50 o 60-40, de lo contrario se dira que existe un desbalanceo. Cuando se encuentre una base desbalanceada, se debe balancear con algun metodoa antes de proceder a la realizacion del modelo
+
+```{r}
+table(basef$y)
+```
+# Paso 2. Balanceo de la data.
+```{r}
+# Separar por clases
+mayoritaria <- basef %>% filter(y == 1)
+minoritaria <- basef %>% filter(y == 0)
+ 
+# Submuestrear la clase mayoritaria (igual número que la minoritaria)
+set.seed(123)  # Para reproducibilidad
+mayoritaria_sub <- sample_n(mayoritaria, nrow(minoritaria))
+ 
+# Combinar ambas clases balanceadas
+basef_balanceada <- bind_rows(mayoritaria_sub, minoritaria)
+table(basef_balanceada$y)
+```
+
+Con la base balanceada, se dvidria la base final en dos partes, una parte dneominada Train que correspondera a la base de entrenamiento del moselo y una parte denominada test que correspondera a la base del prueba del modelo. Posterior se generara el modelo completo con todos los datos
+
+mucha info entrenamiento 60 - 40 probar
+                         70 - 30 --rec
+Poca: 80 - 20 o 90 - 10
+
+
+```{r}
+# Segunda forma para lidiar con nivel de prediccion
+library(caret)
+BaseEntrenamiento <- createDataPartition(y = basef_balanceada$y,
+                                         p = 0.6, # Este valor se puede trabajar desde 0.7 hasta 0.99 (Cuando la muestra es muy grande > 10Millones de registros)
+                                         list = F)
+Entrenamiento <- basef_balanceada[BaseEntrenamiento,]
+Test <- basef_balanceada[-BaseEntrenamiento,]
+dim(Entrenamiento);dim(Test)
+```
+
+# Paso 3. Generacion de un modelo Logit para la base de Entrenamiento, y~ . toma todos los datos de columna Bernoulli binomial..... etc, Solo toma valores enteros(El grupo de omparacion no debe salir aun mujeres y ninguno)
+
+Como elijo que saco, el pvalor. Se debe fijar un nivel de significancia para la lectura del modelo, ese nivel se llamara $\alpha = 0.1$ (Se manejara un error en la lectura de las pruebas del 10%) 5% no recomendado, confianza en los datos tomados. Para elegir las variables que se dejan en el modelo se buscan las que su $Pr(>|z|)$ sean menores al $\alpha$ que usted eligio.
+
+```{r}
+modelo1 <- glm(y ~ ., data = Entrenamiento, family = "binomial")
+summary(modelo1)
+```
+
+# Paso 4. Pronostico del modelo
+
+```{r}
+entrenamientof <- predict(modelo1, newdata = Test, type = "response")
+head(entrenamientof) #Se verifica que los valores sean inferiores a 1, si llega a haber un 1, los datos fueron simulados se reporta
+```
+Se lee accuracy, me dice de 0-100 que tan efectivo es el modelo
+```{r}
+#Este valor se puede modificar entre 0.6 y 0.99
+Informal <- factor(ifelse(entrenamientof > 0.65, 1, 0)) # 
+levels(Informal) <- c("si", "No")
+levels(Test$y) <- c("si", "No")
+
+
+confusionMatrix(Informal,
+                Test$y,
+                positive = "si",
+                mode = "everything")
+```
+Se revisan tambien
+ Precision : 0.5867          
+                 Recall : 0.9094          
+                     F1 : 0.7133 
+
+# Modelo logit completo
+se presentara el modelo logit con la base balanceada y completa. cada uno de los parametros (Estimate) que acompañan las variables tienen asignado un $p-valor = Pr(>|z|)$ el cual indica que si ese valor es menor que $\alpha = 0.1$Nivel de significancia entonces el parametro es significativo, en otras palabras entra al modelo final, en caso contrario se debe eliminar la variable
+
+
+```{r}
+modelof <- glm(y ~ ., data = basef_balanceada, family = "binomial")
+summary(modelof)
+```
+
+
+
+Nota: Para eliminar el intercepto del modelo se debe agregar $+0$ posterior al $y ~ .$ en otras palabras $y~.+0$.
+
+
+
+```{r}
+modelof <- glm(y ~ .+0, data = basef_balanceada, family = "binomial")
+summary(modelof)
+```
+
+Se reivsan lo que tienen asteriscos, basicamente indican la comparacion del estimate y Pr Z
+
+
+
+Como la variable sexo no fue significativa, por que el $P-valor$ asociado a la variable fue mayor a $0.1$, por lo tanto se generara un nuevo modelo excluyendo dicha variable y volviendo a dejar el intercepto. Dejar el intercepto, no sume el 0 al final del estrato asi que lo incluye nuevamente
+```{r}
+modelof <- glm(y ~ edad + educa + escola + salario + contrato + estrato +0, data = basef_balanceada, family = "binomial")
+summary(modelof)
+```
+
+
+Solo una categoria (educa.Ninguno) no funciona, pero no se remueve 1 de 5 que no sirve.
+Nota: Para la variable Educa, se tiene que una de cinco categorias NO es significativa, sin embargo la variable se deberia eliminar completamente cuando mas del 50% de las categorias no sean significativas (En otras palabras que mas del 50% esten en su p-valor por arriba de 0.1) Para la interpretacion NO se tendra en cuenta la categoria Ninguno.
+
+
+Como ya el modelo quedo depurado (Que ya las variables que estan en el modelo son todas significativas, osea que su p-valor esta por debajo del 0.1), se procedera realizar la interpretacion de cada una de las variables en sus respectivas categorias
+
+edad (Estimate  :    1.086e-02 : 0.01086). Forma 1: Si el valor de Estimate es inferior a 1, aumentar 1 año de edad aumenta (Porque el signo del estimate es positivo) la probabilidad de pasar de pasar de Cotizante (valor 1 en la Y) a NO Cotizante (0 en la Y). A mas edad las personas tienen un riesgo de no cotizar. Forma 2: La probabilidad de pasar de cotizante a NO cotizante es de 0.0186 cuando se aumenta la Edad en 1 año, preferible la forma 1.
+
+por dpto minimo 4-5k muestras, aun mas muestra municipal. La primer forma no compromete
+
+
+
+
+* educaBachiller      (Estimate : 7.370e-01 : 0.7370). Forma 1: Aqui no puedo decir que aumento una unidad la variable. (Como no tengo grupo de comparacion , porque la categoria Ninguno no fue significativa se leera de la siguiente forma.) La probabilidad de pasar de Cotizante a no Coitzante (valor 1 en la Y) a NO Cotizante (0 en la Y). aumenta cuando el titulo de la persona es Bachiller. Tener bachillerato aumenta la probabilidad de pasar de cotizante a no cotizante
+
+
+* educaPosgrado   (Estimate: 2.883e+00: 2.883)
+no puedo decir que aumento una unidad la variable. (Como no tengo grupo de comparacion , porque la categoria Ninguno no fue significativa se leera de la siguiente forma.) La probabilidad de pasar de Cotizante a no Coitzante (valor 1 en la Y) a NO Cotizante (0 en la Y). aumenta 2.8 veces cuando el titulo de la persona es Posgrado
+
+
+Todos los estimate se asocian a una probabilidad, asi que lo ponemos en un temrino dsitinto 
+
+
+
+educaTecnico      (Estimate:  1.766e+00 : 1.766 )
+La probabilidad de pasar de Cotizante a no Coitzante (valor 1 en la Y) a NO Cotizante (0 en la Y). aumenta 1.766 veces cuando el titulo de la persona es Tecnico
+
+
+educaUniversitario  2.064e+00 
+
+
+* escola    (Estimate: -1.653e-01 : -0.1653
+Forma 1: Aumentar 1 año de estudios disminuye (Porque el signo del estimate es negativo)
+La probabilidad de pasar de Cotizante a no Coitzante (valor 1 en la Y) a NO Cotizante (0 en la Y).
+
+
+
+
+salario   (Estimate:  7.033e-07 : 0.0000007033) 
+Salario es numerica, no hacemos contragrupo de comparacion
+Forma 1: Aumentar 1 unidad  del salario aumenta (Porque el signo del estimate es positivo)
+La probabilidad de pasar de Cotizante a no Cotizante (valor 1 en la Y) a NO Cotizante (0 en la Y).
+
+
+* contrato2   (Estimate: -7.222e-01 : 0.7222). (Cuando se tenga grupo de comparacion la lectura sera la siguiente). Pasar de tipo de contrato2 (Fijo) a contrato1 (Indefinido) disminuye la probabilidad de pasar de Cotizante a no Cotizante (valor 1 en la Y) a NO Cotizante (0 en la Y).
+
+
+* estrato2   (Estimate: -2.254e-01 : -0.2254). Pasar de estrato2 (Estratos 3y 4) a Estrato1 (Estratos 1 y 2) disminuye la probabilidad de pasar de Cotizante a no Cotizante (valor 1 en la Y) a NO Cotizante (0 en la Y).
+
+
+
+* estrato3    (Estimate: -1.201e+00).
+
+
+¿Como se si increment 1 o mas cantidad Pasar de estrato3 (Estratos 5 y 6) a Estrato1 (Estratos 1 y 2) disminuye la probabilidad de pasar de Cotizante a no Cotizante (valor 1 en la Y) a NO Cotizante (0 en la Y).
+
+
+
+
+
