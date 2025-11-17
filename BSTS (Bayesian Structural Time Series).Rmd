@@ -1,0 +1,78 @@
+---
+title: "BSTS (Bayesian Structural Time Series)"
+author: "Guorti"
+output: word_document
+---
+
+
+```{r}
+library(readxl)
+base <- read_excel("taller BSTS.xlsx")
+```
+
+
+```{r}
+base1 <- base
+base1$`Suma de Italia` <- as.numeric(base1$`Suma de Italia`) ; str(base1$`Suma de Italia`)
+```
+
+
+```{r}
+base1 <- base
+base1$`Suma de Alemania` <- as.numeric(base1$`Suma de Alemania`) ; str(base1$`Suma de Alemania`)
+#Verificar que la variable siempre quede numérica, a menudo es cargada como serie de tiempo (sts) sin embargo eso no sirve. revisar num.
+
+n_test <- 0 # Es la cantidad de datos que se usan para medir la
+#efectividad del modelo. Aquí no hay particiones 70/30 etc.
+#En series inferiores a 20 datos se sugiere que n_test = 0 o 1.
+
+x <- as.numeric(length(base1$`Suma de Alemania`)) - n_test
+x1 <- x + n_test
+Base1 <- base1[-c(x:x1),]
+d_prueba <- base1[c(x:x1),]
+
+#Primer estructura si crece o decrece.
+
+# AddLocarLinearTrend(); Cuando se conoce una tendencia muy marcada (Por ejemplo que tenga varios periodos creciendo o decreciendo sin parar)
+# AddSemiLocalLinearTrend(): Cuando se conocen tendencias por periodos cortos (por ejemplo que suba 3 días continuos y caiga en el 4) Cual usar, tomar por pedazos en vez de generalizada
+
+
+ss1 <- AddSemilocalLinearTrend(list(), base1$`Suma de Alemania`)
+
+# Tratar modificando nseason si por iteraciones no mejora
+ss1 <- AddSeasonal(ss1, base1$`Suma de Alemania`, nseasons = 2) # Se recomienda empezar en 2 hasta llegar a n/2 variando de 1-1, en caso que no se evidencie un aporte al modelo (que no baje el MAPE) se debe comentar este paso o si usted no conoce la serie es mejor dejarlo comentado.
+
+
+# De quienes depende
+model1 <- bsts(base1$`Suma de Alemania`, state.specification = ss1, niter = 10) # Se recomienda empezar en 10 y seguir los múltiplos de 10-10 hasta 10 millones
+
+pred1 <- predict(model1, horizon = n_test + 1, burn = 10*0.01) # burn: Se hacen TODAS las posibles combinaciones de 10-10 hasta 100 y se multiplica por la combinación de 0.01-0.01 hasta 0.1.
+
+pronostico <- pred1$mean # Pronóstico por media
+pronostico1 <- pred1$median # Pronóstico por mediana
+obs <- d_prueba$`Suma de Alemania`
+
+MAPE <- 100*(mean(abs(pronostico - obs) / obs)); MAPE # Media
+MAPE1 <- 100*(mean(abs(pronostico1 - obs) /obs)); MAPE1 # Mediana
+
+
+ss1 <- AddSemilocalLinearTrend(list(), base1$`Suma de Alemania`)
+
+# Tratar modificando nseason si por iteraciones no mejora
+ss1 <- AddSeasonal(ss1, base$`Suma de Alemania`, nseasons = 3) 
+
+modelf <- bsts(base$`Suma de Alemania`, state.specification = ss1, niter = 10)
+
+predf <- predict(modelf, horizon =  5, burn = 10*0.01, interval.quantiles = c(0.05, 0.90))
+
+pronostico <- predf$mean ; round(pronostico,0) # Pronóstico por media
+pronostico_intervalos <- predf$interval
+round(pronostico_intervalos, 0)
+
+pronostico1 <- predf$median; round(pronostico1,0)
+pronostico_intervalos1 <- predf$interval
+round(pronostico_intervalos1,0)
+
+
+```
+
