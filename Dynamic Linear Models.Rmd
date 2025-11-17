@@ -1,0 +1,226 @@
+---
+title: "Modelos Lineales  Dinámicos"
+author: "Guorti"
+output: word_document
+---
+
+
+
+# A mas cantidad de variables la programacion se empieza a volver infinita, el modelo
+# utiliza jags como tecnica de remuestreo, cada vez que ejecute me dara un nuevo mape
+# y un nuevo pronostico.
+
+
+# Importante que empiece el mape a converger en un intervalo correcto.
+# Computacionalmente es mucho mas costoso, n iteraciones no tan grande
+# optimo 10M - 20M.
+
+
+# Carga de paquetes.
+```{r}
+install.packages("rjags")
+install.packages("R2jags")
+install.packages("coda")
+
+library(rjags)
+library(R2jags)
+library(coda)
+```
+
+# Cargar BD
+# Datos de tesis de maestria de analisis de datos
+```{r}
+library(readxl)
+Base <- read_excel("C:/Users/Aulasmoviles/Downloads/Datos_dinamico.xlsx")
+head(Base)
+```
+
+# Modelo y MAPE
+# Si son positivas recomendado usar logaritmo, las tasas siempre son positivas
+```{r}
+y = log(Base$TRM)
+n = length(Base$TRM)
+x1 = log(Base$BRENT)
+x2 = log(Base$DXY)
+x3 = log(Base$BFXLATES)
+
+
+modelo_f <- function(){
+  for(i in 2:(n-3)) {
+    # N-3 se refiere al numero de variables 3 variables en este caso
+    # 1. Distribucion de la variable y: Normal
+    y[i] ~ dnorm(mu[i], h1)
+    mu[i] = beta0[i] + beta1[i]*x1[i] + beta2[i] *x2[i] + beta3[i] * x3[i] 
+    # Si ud tiene una variable discreta un conteo de perrsona, no puede usar una normal, tendria que usar pison o binomial. Dependiendo la bd usted cambia eso
+    beta0[i] ~ dnorm(beta0[i-1], h2)
+    beta1[i] ~ dnorm(beta0[i-1], h3)
+    beta2[i] ~ dnorm(beta0[i-1], h4)
+    beta3[i] ~ dnorm(beta0[i-1], h5)
+  }
+  # Media 0 y una varianza pequeña, varianza muy grande superior a la unidad. Se juega con este segundo teniendo en cuenta las especificaciones de la maquina
+    beta0[1] ~ dnorm(0, 0.0001)
+    beta1[1] ~ dnorm(0, 0.0001)
+    beta2[1] ~ dnorm(0, 0.0001)
+    beta3[1] ~ dnorm(0, 0.0001)
+    
+  # Definimos los h. Diferencia entre la normal y la gamma, en la normal las variables casi nunca son iguales
+    h1 ~ dgamma(0.001, 0.001)
+    h2 ~ dgamma(0.001, 0.001)
+    h3 ~ dgamma(0.001, 0.001)
+    h4 ~ dgamma(0.001, 0.001)
+    h5 ~ dgamma(0.001, 0.001)
+    
+    for(j in 1:3){
+      ypred[j] ~ dnorm(mu[(n-3+j)], h1)
+      mu[(n-3+j)] = beta0[(n-3+j)] + beta1[(n-3+j)]*x1[(n-3+j)] + beta2[(n-3+j)] *x2[(n-3+j)] + beta3[(n-3+j)] * x3[(n-3+j)] 
+      
+      
+    beta0[(n-3+j)] ~ dnorm(beta0[(n-4+j)], h2)
+    beta1[(n-3+j)] ~ dnorm(beta1[(n-4+j)], h3)
+    beta2[(n-3+j)] ~ dnorm(beta2[(n-4+j)], h4)
+    beta3[(n-3+j)] ~ dnorm(beta3[(n-4+j)], h5)
+    }
+}
+
+# Jags hay que darle una entrada, depende de una lista. La lista es n
+
+entrada = list("n", "y", "x1", "x2", "x3")
+salida = c("mu", "h1", "h2", "h3", "h4", "mu", "ypred")
+
+# n.thin DEPENDE DEL NUMERO DE COVARIABLES
+Resultados = jags(data = entrada, parameters.to.save = salida, model = modelo_f, n.chains = 1, n.iter = 100000, n.burnin = 10000, n.thin = 3 )
+
+# 
+Pronosticos = Resultados$BUGSoutput$mean$ypred
+Valores.Obs = y[37:39]
+
+MAPE = 100*mean(abs(Pronosticos-Valores.Obs)/Valores.Obs)
+MAPE
+```
+```{r}
+y = log(Base$TRM)
+n = length(Base$TRM)
+x1 = log(Base$BRENT)
+x2 = log(Base$DXY)
+x3 = log(Base$BFXLATES)
+
+modelo_f <- function() {
+  for (i in 2:(n-3)) {
+    y[i] ~ dnorm(mu[i], h1)
+    mu[i] = beta0[i] + beta1[i]*x1[i] + beta2[i]*x2[i] + beta3[i]*x3[i]
+    beta0[i] ~ dnorm(beta0[i-1], h2)
+    beta1[i] ~ dnorm(beta1[i-1], h3)
+    beta2[i] ~ dnorm(beta2[i-1], h4)
+    beta3[i] ~ dnorm(beta3[i-1], h5)
+  }
+  
+  beta0[1] ~ dnorm(0, 0.0001)
+  beta1[1] ~ dnorm(0, 0.0001)
+  beta2[1] ~ dnorm(0, 0.0001)
+  beta3[1] ~ dnorm(0, 0.0001)
+  h1 ~ dgamma(0.001, 0.001)
+  h2 ~ dgamma(0.001, 0.001)
+  h3 ~ dgamma(0.001, 0.001)
+  h4 ~ dgamma(0.001, 0.001)
+  h5 ~ dgamma(0.001, 0.001)
+  
+  for (j in 1:3) {
+    ypred[j] ~ dnorm(mu[(n-3+j)], h1)
+    mu[(n-3+j)] = beta0[(n-3+j)] + beta1[(n-3+j)]*x1[(n-3+j)] + beta2[(n-3+j)]*x2[(n-3+j)] + beta3[(n-3+j)]*x3[(n-3+j)]
+    
+    beta0[(n-3+j)] ~ dnorm(beta0[(n-4+j)], h2)
+    beta1[(n-3+j)] ~ dnorm(beta1[(n-4+j)], h3)
+    beta2[(n-3+j)] ~ dnorm(beta2[(n-4+j)], h4)
+    beta3[(n-3+j)] ~ dnorm(beta3[(n-4+j)], h5)
+  }
+}
+
+entrada = list("n", "y", "x1", "x2", "x3")
+salida = c("mu", "h1", "h2", "h3", "h4", "h5", "mu", "ypred")
+
+Resultados = jags(data = entrada, parameters.to.save = salida, model = modelo_f, n.chains = 1, n.iter = 100000, n.burnin = 10000, n.thin = 3)
+
+Pronosticos = Resultados$BUGSoutput$mean$ypred
+Valores.Obs = y[37:39]
+
+MAPE = 100*mean(abs(Pronosticos-Valores.Obs)/Valores.Obs)
+MAPE
+
+```
+
+# La gracia es meterle 10M de cadenas
+
+
+
+
+
+```{r}
+y = log(Base$TRM)
+n = length(Base$TRM)
+x1 = log(Base$BRENT)
+x2 = log(Base$DXY)
+x3 = log(Base$BFXLATES)
+
+modelo_def <- function() {
+  # Ya no le dejo n-3 porque no necesito mape ahora
+  for (i in 2:(n)) {
+    y[i] ~ dnorm(mu[i], h1)
+    mu[i] = beta0[i] + beta1[i]*x1[i] + beta2[i]*x2[i] + beta3[i]*x3[i]
+    beta0[i] ~ dnorm(beta0[i-1], h2)
+    beta1[i] ~ dnorm(beta1[i-1], h3)
+    beta2[i] ~ dnorm(beta2[i-1], h4)
+    beta3[i] ~ dnorm(beta3[i-1], h5)
+  }
+  
+  beta0[1] ~ dnorm(0, 0.0001)
+  beta1[1] ~ dnorm(0, 0.0001)
+  beta2[1] ~ dnorm(0, 0.0001)
+  beta3[1] ~ dnorm(0, 0.0001)
+  h1 ~ dgamma(0.001, 0.001)
+  h2 ~ dgamma(0.001, 0.001)
+  h3 ~ dgamma(0.001, 0.001)
+  h4 ~ dgamma(0.001, 0.001)
+  h5 ~ dgamma(0.001, 0.001)
+  
+  for (j in 1:5) {
+    ypred[j] ~ dnorm(mu[(n+j)], h1)
+    mu[(n+j)] = beta0[(n+j)] + beta1[(n+j)]*x1_c[(j)] + beta2[(n+j)]*x2_c[(j)] + beta3[(n+j)]*x3_c[(j)]
+    
+    beta0[(n+j)] ~ dnorm(beta0[(n-1+j)], h2)
+    beta1[(n+j)] ~ dnorm(beta1[(n-1+j)], h3)
+    beta2[(n+j)] ~ dnorm(beta2[(n-1+j)], h4)
+    beta3[(n+j)] ~ dnorm(beta3[(n-1+j)], h5)
+  }
+}
+
+# Se debe hacer el pronostico de las covariables via modelos de series de tiempo ARIMA o SARIMA para ser incluidos en el pronostico de de la variable Y
+
+# Complementarios
+x1_c = c(4.311274,4.33184,4.349106,4.363588,4.375738) 
+x2_c = c(4.632346,4.63049,4.634247,4.638991,4.642498) 
+x3_c = c(3.682589,3.85317,3.682648,3.853111,3.682706) 
+
+# El prnpostico tambien debe hacerse en logaritmo
+
+entrada = list("n", "y", "x1", "x2", "x3", "x1_c", "x2_c", "x3_c")
+salida = c("mu", "h1", "h2", "h3", "h4", "h5", "mu", "beta1",  "ypred")
+
+Resultados_def = jags(data = entrada, parameters.to.save = salida, model = modelo_def, n.chains = 1, n.iter = 100000, n.burnin = 10000, n.thin = 3)
+
+Pronosticos = Resultados_def$BUGSoutput$mean$ypred
+# Poder decir cuando va a ser el promedio mensual 5 meses adelante
+exp(Pronosticos)
+```
+# Estos van a ser los promedios
+
+
+
+
+
+
+
+
+
+
+
+
