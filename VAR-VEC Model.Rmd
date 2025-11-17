@@ -1,0 +1,339 @@
+---
+title: "Modelos Var-Vec"
+author: "Guorti"
+output: word_document
+---
+
+Se busca la relacion de corto plazo (var) y de mediano a largo plazo (vec) entre variables.
+
+1. Grafico de linea.
+  Determinar en que escenario estamos.
+  - Relacion Inversa
+  - Relacion directa
+  Si tengo alguna de las dos, mas adelante en el modelo se argumenta
+  
+2. Pruebas de raiz unitaria.
+  Si x_t tiene raiz unitaria -> I(1)
+  Si x_t No tiene raiz unitaria -> I(0)
+  Igual y_t
+  ¿Para que?
+    Si x_t y y_t son al mismo tiempo I(0) o I(1) -> VAR(p)
+    Si x_t es I(i) y y_t es I(j) -> i>j VEC(p)
+    
+3. Modelo VAR(p)
+  VEC(p) -> Interpretar el vector de correcion. (Relación de largo plazo).
+  
+4.FIR función de impulso respuesta.
+  (Coincidir con el paso 1), la funcion impulso respuesta debe indicar lo mismo
+  Si no coincide quedó mal el modelo.
+  
+  
+Permite encontrar relaciones en series complejas.
+  
+5. Validar el modelo.
+  5.1. Analizar las Raices del Modelo.
+  Dentro del circulo unitario.
+  5.2. Probar independencia.
+  5.3. Normalidad Multivariada.
+  
+  
+    
+
+# Instalacion de paquetes.
+```{r}
+#install.packages("RJDemetra")
+#install.packages("tseries")
+#install.packages("vars")
+library(RJDemetra)
+library(tseries)
+library(vars)
+```
+
+# Carga de base de datos
+```{r}
+library(readxl)
+Base <- read_excel("VAR desempleo-ipc.xlsx")
+head(Base)
+```
+
+# Aplicacion de la funcion TRAMO-SEATS
+Quitar comportamiento repetitivo de la variable.
+  Cada vez que una variable tiene repeticiones en el tiempo (ejemplo prima cada año) Aplicar antes de empezar el modelo.
+  
+  Con la funcion TRAMO-SEATS, se busca descomponer la serie de datos que presente repeticiones en el tiempo para unicamente trabajar con su nivel y not tener en cuenta los picos repetitivos. Para este caso se debe aplicar sobre las variables IPC.
+
+### Primero se aplicara para la variable IPC_M
+Esta corresponde al IPC mensual
+
+```{r}
+IPC_M <- Base$IPC_M
+IPC_M <- ts(IPC_M, freq = 12, start = c(2010,1))
+
+ipcsepc <- tramoseats_spec("RSAfull")
+ipcmsa <- tramoseats(IPC_M, ipcsepc)
+plot(ipcmsa)
+# Se trabajara con el azul
+
+ipcm <- ipcmsa$final$series
+ipcm <- data.frame(ipcm)
+IPC_M_S <- ts(ipcm$sa, freq = 12, start = c(2010,1))
+plot(IPC_M_S)
+```
+### Segundo se aplicara para la variable IPC_VA
+Esta corresponde al IPC variacion año corrido
+
+```{r}
+IPC_A <- Base$IPC_A
+IPC_A <- ts(IPC_A, freq = 12, start = c(2010,1))
+
+ipcsepc <- tramoseats_spec("RSAfull")
+ipcasa <- tramoseats(IPC_A, ipcsepc)
+plot(ipcasa)
+# Se trabajara con el azul
+
+ipca <- ipcasa$final$series
+ipca <- data.frame(ipca)
+IPC_A_S <- ts(ipca$sa, freq = 12, start = c(2010,1))
+plot(IPC_A_S)
+```
+
+# Modelos VAR
+
+## Gráficos de línea
+Como sugerencia se debe elegir una variable importante, para este caso se prioriza el efecto que tenrán las IPC sobre la TD, tasa de desempleo
+```{r}
+# Convertir den base de tiempo
+
+TD <- ts(Base$TD, freq = 12, start = c(2010,1))
+par(nfrow = c(1,3))
+plot(TD)
+plot(IPC_M_S)
+plot(IPC_A_S)
+```
+
+En los graficos se presenta un comportamiento decreciente para la variable TD, mientras que para las variables IPC se evidencia un comportamiento creciente, por lo anterior existe una relacion INVERSA, lo cual se debe verificar con la FIR (Funcion impulso - Resupuesta).
+
+# Pruebas de Raiz Unitaria
+
+$H_0:$ La serie de $Xi$ tiene raiz unitaria.
+
+* Si acepto la serie se llamará I(1) y se debe aplicar una transformación denominada DIFERENCIA usando la funcion diff.
+* Si rechazo la serie se llamara I(0) y NO se debe hacer ninguna transformación.
+* Se debe definir un $\alpha$, para este caso se trabajará $\alpha = 0.05$ o $5%$
+
+```{r}
+tseries::adf.test(TD)
+# Como p-value = 0.4445 > 0.05, entonces NO se rechaza H0, por lo tanto se debe aplicar la transformación diferencial
+
+# d minuscula opoerador diferencial metido
+dTD <- diff(TD)
+tseries::adf.test(dTD)
+# Como p-value = 0.01 < 0.05, entonces se rechaza H0, por lo tanto NO se debe aplicar la transformación diferencia y la serie TD tiene orden I(1)
+```
+
+```{r}
+tseries::adf.test(IPC_M_S)
+# Como p-value = 0.4445 > 0.05, entonces NO se rechaza H0, por lo tanto se debe aplicar la transformación diferencial
+
+# d minuscula opoerador diferencial metido
+dIPC_M_S <- diff(IPC_M_S)
+tseries::adf.test(dIPC_M_S)
+# Como p-value = 0.01 < 0.05, entonces se rechaza H0, por lo tanto NO se debe aplicar la transformación diferencia y la serie TD tiene orden I(1)
+```
+```{r}
+tseries::adf.test(IPC_A_S)
+# Como p-value = 0.7172 > 0.05, entonces NO se rechaza H0, por lo tanto se debe aplicar la transformación diferencial
+
+# d minuscula opoerador diferencial metido
+dIPC_A_S <- diff(IPC_A_S)
+tseries::adf.test(dIPC_A_S)
+# Como p-value = 0.03669 < 0.05, entonces se rechaza H0, por lo tanto NO se debe aplicar la transformación diferencia y la serie TD tiene orden I(1)
+
+```
+
+Posterior a las purebas de raiz unitaria se procede a realizar los modelos VAR con las variables $dTD$, $dIPC_M_S$, $dIPC_A_S$
+
+```{r}
+dseries <- data.frame(dTD, dIPC_M_S, dIPC_A_S)
+dseries <- ts(dseries, freq = 12, start = c(2010,1))
+plot(dseries)
+```
+
+
+# Prueba de causalidad de Granger (Modelos VAR).
+
+La prueba de Granger se usa para determinar la existencia de una relación en un corto plazo entre las variables.
+
+En primer lugar se hará la prueba para las variables $TD$ y $IPC\_M\_S$.
+La hipotesis que se manejará es: $H_0:$ No hay causalidad entre las variables. Objetivo: Rechazar. $\alpha = 0.05$
+
+Nota: Hay que variar order desde 2 en adelante hasta que rechace o la prueba no converja.
+Rechazo unicamente cuando el p-valor es mayor al alpha
+```{r}
+grangertest(dIPC_M_S ~ dTD, order = 14, data = dseries)
+# El número de lags requerido es 14
+```
+Res.Df: Grados de libertad de los residuos
+
+Encontrar un orden que permita rechazar la prueba, apenas se rechaza se deja ese lag, no se busca bajarlo mas
+```{r}
+grangertest(dIPC_A_S ~ dTD, order = 21, data = dseries)
+# El número de lags requerido es 21
+```
+
+Nota: 
+Para la relación entre las $dDT$, $dIPC\_M\_S$ y $dIPC\_A\_S$ se encontró lo siguiente:
+
+* Se rechaza la prueba de NO  causalidad entre las variables, por lo tanto, $dIPC\_M\_S$ y $dIPC\_A\_S$ son afectadas en el corto plazo por $dTD$ o existe un relacion causal entre las variables.
+
+
+## Planteamiento del modelo
+
+### Modelo para dIPC\_M\S y dTD
+
+
+```{r}
+dseries1 <- dseries[,1:2]
+VARselect(dseries1, lag.max = 6, type = "const")
+```
+~$selection: Criterios de seleccion, mejor par en este momento
+continuación se presentan 4 criterios de selección para determinar cual debe ser orden $p$ del modelo $VAR(p)$
+
+* AIC(n)  : 4 (Criterio de información de Akaike)
+* HQ(n) : 1 (Criterio de información Hannan-Queen)
+* SC(n) : 1 (Criterio de Información Bayesiano)
+* FPE(n) : 4 (Criterio de Información ?)
+
+Dos me dicen 4, y dos me dicen 1. Empate entre dos criterios 
+
+Para elección del mejor modelo se recomienda siempre el menor rezago. En este caso se recomendaría las pruebas 2 y 3 y el mejor modelo seria un $VAR(1)$.
+
+```{r}
+# Modelo
+modelo1 <- VAR(dseries1, p = 1, type = "const")
+#summary(modelo1)
+```
+
+### Función Impulso ~ Respuesta
+
+```{r}
+modelofir1 <- irf(modelo1, impulse = "dTD", response = "dIPC_M_S")
+plot(modelofir1)
+```
+
+En la gráfica anterior se presenta una relación inversa (Porque el gráfico se encuentra por debajo de cero), donde el aumento de la variable $dTD$ (Aumento de la tasa de Desempleo) generará un efecto negativo de la variable $dIPC\M_\_S$ el cual se extingue en el tiempo. (En este caso, si aumenta el desempleo baja la inflacion, dura 3 meses)
+
+
+
+
+
+### Modelo para dIPC\_A\S y dTD
+
+Ahora necesito dIPC_A, trabaje sin la segunda variable [-2]
+```{r}
+dseries2 <- dseries[,-2]
+VARselect(dseries2, lag.max = 6, type = "const")
+```
+~$selection: Criterios de seleccion, mejor par en este momento
+continuación se presentan 4 criterios de selección para determinar cual debe ser orden $p$ del modelo $VAR(p)$
+
+* AIC(n)  : 4 (Criterio de información de Akaike)
+* HQ(n) : 1 (Criterio de información Hannan-Queen)
+* SC(n) : 1 (Criterio de Información Bayesiano)
+* FPE(n) : 4 (Criterio de Información ?)
+
+Dos me dicen 4, y dos me dicen 1. Empate entre dos criterios 
+
+Para elección del mejor modelo se recomienda siempre el menor rezago. En este caso se recomendaría las pruebas 2 y 3 y el mejor modelo seria un $VAR(1)$.
+
+```{r}
+# Modelo
+modelo2 <- VAR(dseries2, p = 1, type = "const")
+#summary(modelo1)
+```
+
+### Función Impulso ~ Respuesta
+
+```{r}
+modelofir2 <- irf(modelo2, impulse = "dTD", response = "dIPC_A_S")
+plot(modelofir2)
+```
+
+El efecto es largo de recuperar, 4 meses
+
+En la gráfica anterior se presenta una relación inversa (Porque el gráfico se encuentra por debajo de cero), donde el aumento de la variable $dTD$ (Aumento de la tasa de Desempleo) generará un efecto negativo de la variable $dIPC\_A\_S$ el cual se extingue en el tiempo. (En este caso, si aumenta el desempleo baja la inflacion, dura 4 meses)
+
+
+### Validación de modelos.
+
+```{r}
+modelom <- modelo1
+modeloa <- modelo2
+```
+
+En primer lugar se evaluara si las raices de los polinomios se encuentran por debajo de la unidad, esto con el fin de cumplir con el supuesto de estabilidad del modelo.
+```{r}
+roots(modelom) # Para el modelo con la inflacion mensual se tiene que las raices estan por debajo de la unidad por lo tanto se cumple el supuesto de estabilidad.
+```
+
+```{r}
+roots(modeloa) # Para el modelo con la inflacion año corrido se tiene que las raices estan por debajo de la unidad por lo tanto se cumple el supuesto de estabilidad.
+```
+
+Ahora se presentará la prueba de Autocorrelacion de los residuales, para ello se usarán las pruebas de Pormanteu multivariada y la prueba de Breusch - Godfrey. La hipótesis nula que se maneja en estas pruebas $H_0:$ los residuales son independientes. Objetivo: NO Rechazar.
+
+```{r}
+serial.test(modelom, lags.pt = 12) # 12: 12 periodos mensuales
+# P- valor = 0.1643 y alpha = 0.05, entonces NO SE RECHZA O SE ACEPTA, es superior al p-valor
+
+serial.test(modelom, lags.bg = 12) # 12: 12 periodos mensuales
+# P- valor = 0.06683 y alpha = 0.05, entonces NO SE RECHZA O SE ACEPTA, es superior al p-valor
+
+# Nota: En caso que una de las pruebas rechace solamente se presenta la que no rechaza
+
+```
+
+
+```{r}
+serial.test(modeloa, lags.pt = 12) # 12: 12 periodos mensuales
+# P- valor = 0.1231 y alpha = 0.05, entonces NO SE RECHZA O SE ACEPTA, es superior al p-valor
+
+serial.test(modeloa, lags.bg = 12) # 12: 12 periodos mensuales
+# P- valor = 0.1463 y alpha = 0.05, entonces NO SE RECHZA O SE ACEPTA, es superior al p-valor
+
+# Nota: En caso que una de las pruebas rechace solamente se presenta la que no rechaza
+
+```
+
+Ahora se presentará la prueba de normalidad multivariada. La hipótesis que se manejará es $H_0:$ Los residuales siguen distribuicion normal multivariada. Objetivo: No Rechazar
+
+```{r}
+normality.test(modelom, multivariate.only = F)
+
+# Sirve JB-Test (multivariate)
+# p-valor = p-value < 2.2e-16 y alpha = 0.05 entonces se RECHAZA, por lo tanto los residuales no siguen distribución Normal Multivariada
+```
+
+
+
+```{r}
+normality.test(modeloa, multivariate.only = F)
+# Sirve JB-Test (multivariate)
+# p-valor = p-value < 2.2e-16 y alpha = 0.05 entonces se RECHAZA, por lo tanto los residuales no siguen distribución Normal Multivariada
+```
+
+
+Como se rechaza la prueba de Normalidad Multivariada, se debe citar el documento de Fernandez - Corugedo(2003) (Exercise on unit roots (including structural breacks), estimating a VECM and the implications of the VECM ), en este documento el autor indica que es más importante la prueba de independencia de los residuales que la prueba de normalidad multivariada en los modleos VAR-VEC.
+
+
+
+
+
+
+
+
+
+
+
+
+
